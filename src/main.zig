@@ -1,15 +1,45 @@
 const std = @import("std");
+const scip = @import("scip.zig");
+const protobruh = @import("protobruh.zig");
+const StoreToScip = @import("StoreToScip.zig");
 const DocumentStore = @import("analysis/DocumentStore.zig");
 
 pub fn main() !void {
-    const big_loris = "C:\\Programming\\Zig\\scip-zig\\test\\loris.zig";
-
     var doc_store = DocumentStore{ .allocator = std.heap.page_allocator };
-    _ = try doc_store.load(big_loris);
+    try doc_store.createPackage("root", "C:\\Programming\\Zig\\scip-zig\\test\\loris.zig");
+    // _ = try doc_store.load(big_loris);
 
-    const the_big_loris = try doc_store.getOrCreateHandle(big_loris);
-    var iterator = the_big_loris.analyzer.scopes.items[0].decls.iterator();
+    // _ = try doc_store.getOrCreateHandle(big_loris);
+    // var iterator = the_big_loris.analyzer.scopes.items[0].decls.iterator();
 
-    while (iterator.next()) |entry|
-        std.log.info("{s}: {any}", .{ entry.key_ptr.*, entry.value_ptr.* });
+    // while (iterator.next()) |entry|
+    //     std.log.info("{s}: {any}", .{ entry.key_ptr.*, entry.value_ptr.* });
+
+    var my_test_index = try std.fs.cwd().createFile("my_test_index.scip", .{ .read = true });
+
+    var documents = try StoreToScip.storeToScip(std.heap.page_allocator, &doc_store);
+
+    std.log.info("{any}", .{documents});
+
+    try protobruh.encode(scip.Index{
+        .metadata = .{
+            .version = .unspecified_protocol_version,
+            .tool_info = .{
+                .name = "scip-zig",
+                .version = "unversioned",
+                .arguments = .{},
+            },
+            .project_root = "file:///mnt/c/Programming/Zig/scip-zig/test",
+            .text_document_encoding = .utf8,
+        },
+        .documents = documents,
+        .external_symbols = .{},
+    }, my_test_index.writer());
+
+    my_test_index.close();
+
+    var my_test_index2 = try std.fs.cwd().openFile("my_test_index.scip", .{});
+
+    var z = try protobruh.decode(scip.Index, std.heap.page_allocator, my_test_index2.reader());
+    std.log.info("AAA: {any}", .{z.documents.items});
 }

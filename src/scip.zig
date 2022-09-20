@@ -20,31 +20,31 @@ const std = @import("std");
 /// `metadata` field must appear at the start of the stream and must only appear
 /// once in the stream. Other field values may appear in any order.
 pub const Index = struct {
-    pub const tags = std.ComptimeStringMap(u64, .{
+    pub const tags = .{
         .{ "metadata", 1 },
         .{ "documents", 2 },
         .{ "external_symbols", 3 },
-    });
+    };
 
     /// Metadata about this index.
     metadata: Metadata,
     /// Documents that belong to this index.
-    documents: []const Document,
+    documents: std.ArrayListUnmanaged(Document),
     /// (optional) Symbols that are referenced from this index but are defined in
     /// an external package (a separate `Index` message). Leave this field empty
     /// if you assume the external package will get indexed separately. If the
     /// external package won't get indexed for some reason then you can use this
     /// field to provide hover documentation for those external symbols.
-    external_symbols: []const SymbolInformation,
+    external_symbols: std.ArrayListUnmanaged(SymbolInformation),
 };
 
 pub const Metadata = struct {
-    pub const tags = std.ComptimeStringMap(u64, .{
+    pub const tags = .{
         .{ "version", 1 },
         .{ "tool_info", 2 },
         .{ "project_root", 3 },
         .{ "text_document_encoding", 4 },
-    });
+    };
 
     /// Which version of this protocol was used to generate this index?
     version: ProtocolVersion,
@@ -70,28 +70,28 @@ pub const TextEncoding = enum(u64) {
 };
 
 pub const ToolInfo = struct {
-    pub const tags = std.ComptimeStringMap(u64, .{
+    pub const tags = .{
         .{ "name", 1 },
         .{ "version", 2 },
         .{ "arguments", 3 },
-    });
+    };
 
     /// Name of the indexer that produced this index.
     name: []const u8,
     /// Version of the indexer that produced this index.
     version: []const u8,
     /// Command-line arguments that were used to invoke this indexer.
-    arguments: []const []const u8,
+    arguments: std.ArrayListUnmanaged([]const u8),
 };
 
 /// Document defines the metadata about a source file on disk.
 pub const Document = struct {
-    pub const tags = std.ComptimeStringMap(u64, .{
+    pub const tags = .{
         .{ "language", 4 },
         .{ "relative_path", 1 },
         .{ "occurrences", 2 },
         .{ "symbols", 3 },
-    });
+    };
 
     /// The string ID for the programming language this file is written in.
     /// The `Language` enum contains the names of most common programming languages.
@@ -109,9 +109,9 @@ pub const Document = struct {
     ///    or '.' or '..'.
     relative_path: []const u8,
     /// Occurrences that appear in this file.
-    occurrences: []const Occurrence,
+    occurrences: std.ArrayListUnmanaged(Occurrence),
     /// Symbols that are defined within this document.
-    symbols: []const SymbolInformation,
+    symbols: std.ArrayListUnmanaged(SymbolInformation),
 };
 
 /// Symbol is similar to a URI, it identifies a class, method, or a local
@@ -151,26 +151,26 @@ pub const Document = struct {
 /// for every node in the AST (along the ancestry path) between the root of
 /// the file and the node corresponding to the symbol.
 pub const Symbol = struct {
-    pub const tags = std.ComptimeStringMap(u64, .{
+    pub const tags = .{
         .{ "scheme", 1 },
         .{ "package", 2 },
         .{ "descriptors", 3 },
-    });
+    };
 
     scheme: []const u8,
     package: Package,
-    descriptors: []const Descriptor,
+    descriptors: std.ArrayListUnmanaged(Descriptor),
 };
 
 /// Unit of packaging and distribution.
 ///
 /// NOTE: This corresponds to a module in Go and JVM languages.
 pub const Package = struct {
-    pub const tags = std.ComptimeStringMap(u64, .{
+    pub const tags = .{
         .{ "manager", 1 },
         .{ "name", 2 },
         .{ "version", 3 },
-    });
+    };
 
     manager: []const u8,
     name: []const u8,
@@ -178,7 +178,7 @@ pub const Package = struct {
 };
 
 pub const Descriptor = struct {
-    pub const Suffix = enum {
+    pub const Suffix = enum(u64) {
         unspecified_suffix = 0,
         /// Unit of code abstraction and/or namespacing.
         ///
@@ -195,11 +195,11 @@ pub const Descriptor = struct {
         local = 8,
     };
 
-    pub const tags = std.ComptimeStringMap(u64, .{
+    pub const tags = .{
         .{ "name", 1 },
         .{ "disambiguator", 2 },
         .{ "suffix", 3 },
-    });
+    };
 
     name: []const u8,
     disambiguator: []const u8,
@@ -209,11 +209,11 @@ pub const Descriptor = struct {
 /// SymbolInformation defines metadata about a symbol, such as the symbol's
 /// docstring or what package it's defined it.
 pub const SymbolInformation = struct {
-    pub const tags = std.ComptimeStringMap(u64, .{
+    pub const tags = .{
         .{ "symbol", 1 },
         .{ "documentation", 3 },
         .{ "relationships", 4 },
-    });
+    };
 
     /// Identifier of this symbol, which can be referenced from `Occurence.symbol`.
     /// The string must be formatted according to the grammar in `Symbol`.
@@ -222,18 +222,18 @@ pub const SymbolInformation = struct {
     /// for this symbol. This field is repeated to allow different kinds of
     /// documentation.  For example, it's nice to include both the signature of a
     /// method (parameters and return type) along with the accompanying docstring.
-    documentation: []const []const u8,
+    documentation: std.ArrayListUnmanaged([]const u8),
     /// (optional) Relationships to other symbols (e.g., implements, type definition).
-    relationships: []const Relationship,
+    relationships: std.ArrayListUnmanaged(Relationship),
 };
 
 pub const Relationship = struct {
-    pub const tags = std.ComptimeStringMap(u64, .{
+    pub const tags = .{
         .{ "symbol", 1 },
         .{ "is_reference", 2 },
         .{ "is_implementation", 3 },
         .{ "is_type_definition", 4 },
-    });
+    };
 
     symbol: []const u8,
     /// When resolving "Find references", this field documents what other symbols
@@ -394,14 +394,14 @@ pub const SyntaxKind = enum(u64) {
 /// If possible, indexers should try to bundle logically related information
 /// across occurrences into a single occurrence to reduce payload sizes.
 pub const Occurrence = struct {
-    pub const tags = std.ComptimeStringMap(u64, .{
+    pub const tags = .{
         .{ "range", 1 },
         .{ "symbol", 2 },
         .{ "symbol_roles", 3 },
         .{ "override_documentation", 4 },
         .{ "syntax_kind", 5 },
         .{ "diagnostics", 6 },
-    });
+    };
 
     /// Source position of this occurrence. Must be exactly three or four
     /// elements:
@@ -421,7 +421,7 @@ pub const Occurrence = struct {
     /// instead.  The `repeated int32` encoding is admittedly more embarrassing to
     /// work with in some programming languages but we hope the performance
     /// improvements make up for it.
-    range: []const i32,
+    range: std.ArrayListUnmanaged(i32),
     /// (optional) The symbol that appears at this position. See
     /// `SymbolInformation.symbol` for how to format symbols as strings.
     symbol: []const u8,
@@ -436,23 +436,23 @@ pub const Occurrence = struct {
     ///
     /// This field can also be used for dynamically or gradually typed languages,
     /// which commonly allow for type-changing assignment.
-    override_documentation: []const []const u8,
+    override_documentation: std.ArrayListUnmanaged([]const u8),
     /// (optional) What syntax highlighting class should be used for this range?
     syntax_kind: SyntaxKind,
     /// (optional) Diagnostics that have been reported for this specific range.
-    diagnostics: []const Diagnostic,
+    diagnostics: std.ArrayListUnmanaged(Diagnostic),
 };
 
 /// Represents a diagnostic, such as a compiler error or warning, which should be
 /// reported for a document.
 pub const Diagnostic = struct {
-    pub const tags = std.ComptimeStringMap(u64, .{
+    pub const tags = .{
         .{ "severity", 1 },
         .{ "code", 2 },
         .{ "message", 3 },
         .{ "source", 4 },
         .{ "tags", 5 },
-    });
+    };
 
     /// Should this diagnostic be reported as an error, warning, info, or hint?
     severity: Severity,
@@ -463,7 +463,7 @@ pub const Diagnostic = struct {
     /// (optional) Human-readable string describing the source of this diagnostic, e.g.
     /// 'typescript' or 'super lint'.
     source: []const u8,
-    tags: []const DiagnosticTag,
+    tags: std.ArrayListUnmanaged(DiagnosticTag),
 };
 
 pub const Severity = enum(u64) {
@@ -589,64 +589,3 @@ pub const Language = enum(u64) {
     // 4. Move the new language to the correct line above using alphabetical order
     // 5. (optional) Add a brief comment behind the language if the name is not self-explanatory
 };
-
-// We don't implement decode as this is only an index emitter
-
-pub fn zigTypeToWireType(comptime T: type) u64 {
-    if (@TypeOf(T) == .Enum) return 0;
-
-    return switch (T) {
-        u32 => 5,
-        u64 => 1,
-        else => 2, // hacky bs
-    };
-}
-
-pub fn encode(writer: anytype, value: anytype) !void {
-    const T = @TypeOf(value);
-    if (@typeInfo(value) == .Struct and !@hasDecl(T, "tags")) @compileError("Struct missing Protobuf tags!");
-
-    switch (@typeInfo(T)) {
-        .Int => |bits| {
-            switch (bits) {
-                32, 64 => {},
-                else => @compileError("Int type not supported!"),
-            }
-
-            try std.leb.writeULEB128(writer, value);
-        },
-        .Struct => |struct_info| {
-            inline for (struct_info.fields) |field| {
-                try std.leb.writeULEB128(writer, @as(u64, T.tags.get(field.name)) | zigTypeToWireType(field.field_type));
-                try encode(writer, @field(value, field.name));
-            }
-        },
-        .Pointer => |ptr_info| {
-            if (T == []const u8) {
-                try std.leb.writeULEB128(writer, value.len);
-                try writer.writeAll(value);
-                return;
-            }
-        },
-    }
-}
-
-test {
-    var my_test_index = try std.fs.cwd().createFile("my_test_index.scip", .{});
-    defer my_test_index.close();
-
-    try encode(my_test_index.writer(), Index{
-        .metadata = .{
-            .version = .unspecified_protocol_version,
-            .tool_info = .{
-                .name = "joe",
-                .version = "mama",
-                .arguments = &.{ "amog", "us" },
-            },
-            .project_root = "",
-            .text_document_encoding = unspecified_text_encoding,
-        },
-        .documents = &.{},
-        .external_symbols = &.{},
-    });
-}

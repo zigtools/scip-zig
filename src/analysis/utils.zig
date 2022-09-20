@@ -6,6 +6,7 @@ const std = @import("std");
 const Ast = std.zig.Ast;
 const Node = Ast.Node;
 const full = Ast.full;
+const builtin = @import("builtin");
 
 fn fullPtrType(tree: Ast, info: full.PtrType.Components) full.PtrType {
     const token_tags = tree.tokens.items(.tag);
@@ -1299,4 +1300,117 @@ pub fn getDeclName(tree: Ast, node: Ast.Node.Index) ?[]const u8 {
         .test_decl => name[1 .. name.len - 1],
         else => name,
     };
+}
+
+/// Gets a declaration's doc comments. Caller owns returned memory.
+pub fn getDocComments(allocator: std.mem.Allocator, tree: Ast, node: Ast.Node.Index) !?std.ArrayListUnmanaged([]const u8) {
+    const base = tree.nodes.items(.main_token)[node];
+    const base_kind = tree.nodes.items(.tag)[node];
+    const tokens = tree.tokens.items(.tag);
+
+    switch (base_kind) {
+        // As far as I know, this does not actually happen yet, but it
+        // may come in useful.
+        .root => return try collectDocComments(allocator, tree, 0, true),
+        .fn_proto,
+        .fn_proto_one,
+        .fn_proto_simple,
+        .fn_proto_multi,
+        .fn_decl,
+        .local_var_decl,
+        .global_var_decl,
+        .aligned_var_decl,
+        .simple_var_decl,
+        .container_field_init,
+        => {
+            if (getDocCommentTokenIndex(tokens, base)) |doc_comment_index|
+                return try collectDocComments(allocator, tree, doc_comment_index, false);
+        },
+        else => {},
+    }
+    return null;
+}
+
+/// Get the first doc comment of a declaration.
+fn getDocCommentTokenIndex(tokens: []std.zig.Token.Tag, base_token: Ast.TokenIndex) ?Ast.TokenIndex {
+    var idx = base_token;
+    if (idx == 0) return null;
+    idx -= 1;
+    if (tokens[idx] == .keyword_threadlocal and idx > 0) idx -= 1;
+    if (tokens[idx] == .string_literal and idx > 1 and tokens[idx - 1] == .keyword_extern) idx -= 1;
+    if (tokens[idx] == .keyword_extern and idx > 0) idx -= 1;
+    if (tokens[idx] == .keyword_export and idx > 0) idx -= 1;
+    if (tokens[idx] == .keyword_inline and idx > 0) idx -= 1;
+    if (tokens[idx] == .keyword_pub and idx > 0) idx -= 1;
+
+    // Find first doc comment token
+    if (!(tokens[idx] == .doc_comment))
+        return null;
+    return while (tokens[idx] == .doc_comment) {
+        if (idx == 0) break 0;
+        idx -= 1;
+    } else idx + 1;
+}
+
+fn collectDocComments(allocator: std.mem.Allocator, tree: Ast, doc_comments: Ast.TokenIndex, container_doc: bool) !std.ArrayListUnmanaged([]const u8) {
+    var lines = std.ArrayListUnmanaged([]const u8){};
+    const tokens = tree.tokens.items(.tag);
+
+    var curr_line_tok = doc_comments;
+    while (true) : (curr_line_tok += 1) {
+        const comm = tokens[curr_line_tok];
+        if ((container_doc and comm == .container_doc_comment) or (!container_doc and comm == .doc_comment)) {
+            try lines.append(allocator, std.mem.trim(u8, tree.tokenSlice(curr_line_tok)[3..], &std.ascii.spaces));
+        } else break;
+    }
+
+    return lines;
+}
+
+// http://tools.ietf.org/html/rfc3986#section-2.2
+const reserved_chars = &[_]u8{
+    '!', '#', '$', '%', '&', '\'',
+    '(', ')', '*', '+', ',', ':',
+    ';', '=', '?', '@', '[', ']',
+};
+
+const reserved_escapes = blk: {
+    var escapes: [reserved_chars.len][3]u8 = [_][3]u8{[_]u8{undefined} ** 3} ** reserved_chars.len;
+
+    for (reserved_chars) |c, i| {
+        escapes[i][0] = '%';
+        _ = std.fmt.bufPrint(escapes[i][1..], "{X}", .{c}) catch unreachable;
+    }
+    break :blk &escapes;
+};
+
+/// Returns a URI from a path, caller owns the memory allocated with `allocator`
+fn fromPath(allocator: std.mem.Allocator, path: []const u8) ![]const u8 {
+    if (path.len == 0) return "";
+    const prefix = if (builtin.os.tag == .windows) "file:///" else "file://";
+
+    var buf = std.ArrayListUnmanaged(u8){};
+    try buf.appendSlice(allocator, prefix);
+
+    for (path) |char| {
+        if (char == std.fs.path.sep) {
+            try buf.append(allocator, '/');
+        } else if (std.mem.indexOfScalar(u8, reserved_chars, char)) |reserved| {
+            try buf.appendSlice(allocator, &reserved_escapes[reserved]);
+        } else {
+            try buf.append(allocator, char);
+        }
+    }
+
+    // On windows, we need to lowercase the drive name.
+    if (builtin.os.tag == .windows) {
+        if (buf.items.len > prefix.len + 1 and
+            std.ascii.isAlpha(buf.items[prefix.len]) and
+            std.mem.startsWith(u8, buf.items[prefix.len + 1 ..], "%3A"))
+        {
+            buf.items[prefix.len] = std.ascii.toLower(buf.items[prefix.len]);
+        }
+    }
+
+    return buf.toOwnedSlice(allocator);
 }
