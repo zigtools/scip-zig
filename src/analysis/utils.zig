@@ -463,8 +463,8 @@ pub fn lastToken(tree: Ast, node: Ast.Node.Index) Ast.TokenIndex {
 
         .anyframe_literal,
         .char_literal,
-        .integer_literal,
-        .float_literal,
+        .number_literal,
+        // .float_literal,
         .unreachable_literal,
         .identifier,
         .deref,
