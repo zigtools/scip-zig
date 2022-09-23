@@ -203,7 +203,7 @@ pub fn lineSliceAtPosition(text: []const u8, position: Position) []const u8 {
 
 pub fn lineLocUntilIndex(text: []const u8, index: usize) Loc {
     return .{
-        .start = if (std.mem.lastIndexOfScalar(u8, text[0..index], '\n')) |idx| idx else 0,
+        .start = if (std.mem.lastIndexOfScalar(u8, text[0..index], '\n')) |idx| idx + 1 else 0,
         .end = index,
     };
 }

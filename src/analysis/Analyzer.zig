@@ -87,7 +87,6 @@ pub fn getDescriptor(analyzer: *Analyzer, maybe_scope_idx: ?usize) ?[]const u8 {
 }
 
 pub fn fillRangeList(analyzer: *Analyzer, token: zig.Ast.TokenIndex, list: *std.ArrayListUnmanaged(i32)) !void {
-    // TODO: Look into weird inclusion of suffix ":"s and " "s
     var range_orig = offsets.tokenToRange(analyzer.handle.tree, token);
     try list.appendSlice(analyzer.allocator, &.{
         @intCast(i32, range_orig.start.line),
