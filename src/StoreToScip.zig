@@ -17,7 +17,7 @@ pub fn storeToScip(allocator: std.mem.Allocator, store: *DocumentStore) !std.Arr
 
         document.* = .{
             .language = "zig",
-            .relative_path = entry.key_ptr.*, // TODO: Relativize paths
+            .relative_path = entry.key_ptr.*,
             .occurrences = handle.analyzer.occurrences,
             .symbols = handle.analyzer.symbols,
         };

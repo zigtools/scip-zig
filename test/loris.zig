@@ -1,3 +1,5 @@
+pub const king = @import("king.zig");
+
 const name = "Loris";
 pub const coolness: u8 = 100;
 /// My comment

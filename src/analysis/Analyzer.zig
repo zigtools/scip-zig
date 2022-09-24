@@ -6,6 +6,8 @@ const utils = @import("utils.zig");
 const offsets = @import("offsets.zig");
 const DocumentStore = @import("DocumentStore.zig");
 
+const logger = std.log.scoped(.analyzer);
+
 const Analyzer = @This();
 
 allocator: std.mem.Allocator,
@@ -20,7 +22,10 @@ occurrences: std.ArrayListUnmanaged(scip.Occurrence) = .{},
 
 local_counter: usize = 0,
 
+// TODO: Make scope map to avoid scope duplication, decrease lookup times
+
 pub fn init(analyzer: *Analyzer) !void {
+    logger.info("Initializing file {s}", .{analyzer.handle.path});
     try analyzer.newContainerScope(null, 0, "root");
 }
 
@@ -35,6 +40,8 @@ pub const Scope = struct {
         }, // .tag is ContainerDecl or Root or ErrorSetDecl
         function: Ast.Node.Index, // .tag is FnProto
         block: Ast.Node.Index, // .tag is Block
+        // TODO: Is this really the most efficient way?
+        import: []const u8,
         other,
     };
 
@@ -59,6 +66,116 @@ pub const Scope = struct {
         };
     }
 };
+
+// pub const ResolveAndMarkResult = struct {
+//     analyzer: *Analyzer,
+//     scope_idx: usize,
+//     declaration: ?Declaration = null,
+// };
+
+pub const TrueScopeIndexResult = struct {
+    /// Analyzer where scope is located
+    analyzer: *Analyzer,
+    /// Scope
+    scope_idx: usize,
+};
+
+pub fn resolveTrueScopeIndex(
+    analyzer: *Analyzer,
+    scope_idx: usize,
+) anyerror!?TrueScopeIndexResult {
+    const scope = analyzer.scopes.items[scope_idx];
+    return switch (scope.data) {
+        .import => |i| TrueScopeIndexResult{
+            // NOTE: This really seems dangerous... but it works so like can't complain (yet)
+            .analyzer = &((try analyzer.handle.document_store.resolveImportHandle(analyzer.handle, i)) orelse return null).analyzer,
+            .scope_idx = 0,
+        },
+        else => TrueScopeIndexResult{ .analyzer = analyzer, .scope_idx = scope_idx },
+    };
+}
+
+pub const DeclarationWithAnalyzer = struct {
+    analyzer: *Analyzer,
+    declaration: ?Declaration = null,
+};
+
+pub fn getDeclFromScopeByName(
+    analyzer: *Analyzer,
+    scope_idx: usize,
+    name: []const u8,
+) anyerror!DeclarationWithAnalyzer {
+    var ts = (try analyzer.resolveTrueScopeIndex(scope_idx)) orelse return DeclarationWithAnalyzer{ .analyzer = analyzer };
+    if (ts.analyzer.scopes.items.len == 0) return DeclarationWithAnalyzer{ .analyzer = ts.analyzer };
+    return DeclarationWithAnalyzer{ .analyzer = ts.analyzer, .declaration = ts.analyzer.scopes.items[ts.scope_idx].decls.get(name) };
+}
+
+pub fn resolveAndMarkDeclarationIdentifier(
+    analyzer: *Analyzer,
+    foreign_analyzer: *Analyzer,
+    scope_idx: usize,
+    token_idx: Ast.TokenIndex,
+) anyerror!DeclarationWithAnalyzer {
+    const tree = analyzer.handle.tree;
+    // const scope = analyzer.scopes.items[scope_idx];
+
+    var dwa = try foreign_analyzer.getDeclFromScopeByName(scope_idx, tree.tokenSlice(token_idx));
+    if (dwa.declaration == null)
+        dwa = try analyzer.resolveAndMarkDeclarationIdentifier(foreign_analyzer, if (scope_idx > analyzer.scopes.items.len) return DeclarationWithAnalyzer{ .analyzer = analyzer } else analyzer.scopes.items[scope_idx].parent_scope_idx orelse return DeclarationWithAnalyzer{ .analyzer = analyzer }, token_idx);
+
+    if (dwa.declaration) |decl| {
+        if ((try analyzer.recorded_occurrences.fetchPut(analyzer.allocator, token_idx, {})) == null) {
+            var range_list = std.ArrayListUnmanaged(i32){};
+            try analyzer.fillRangeList(token_idx, &range_list);
+            try analyzer.occurrences.append(analyzer.allocator, .{
+                .range = range_list,
+                .symbol = decl.symbol,
+                .symbol_roles = 0,
+                .override_documentation = .{},
+                .syntax_kind = .identifier,
+                .diagnostics = .{},
+            });
+        }
+    }
+
+    return dwa;
+}
+
+pub fn resolveAndMarkDeclarationComplex(
+    analyzer: *Analyzer,
+    foreign_analyzer: *Analyzer,
+    scope_idx: usize,
+    node_idx: Ast.Node.Index,
+) anyerror!DeclarationWithAnalyzer {
+    const tree = analyzer.handle.tree;
+    const tags = tree.nodes.items(.tag);
+    const data = tree.nodes.items(.data);
+
+    return switch (tags[node_idx]) {
+        .identifier => analyzer.resolveAndMarkDeclarationIdentifier(foreign_analyzer, scope_idx, tree.nodes.items(.main_token)[node_idx]),
+        .field_access => {
+            const curr_name_idx = data[node_idx].rhs;
+            const prev_node_idx = data[node_idx].lhs;
+
+            // const scope_decl = () orelse return .{ .analyzer = analyzer };
+            const result = try analyzer.resolveAndMarkDeclarationComplex(foreign_analyzer, scope_idx, prev_node_idx);
+            if (result.declaration) |scope_decl| {
+                for (result.analyzer.scopes.items) |scope, idx| {
+                    if (scope.node_idx == scope_decl.data.variable.ast.init_node) {
+                        const maybe_decl = try analyzer.resolveAndMarkDeclarationIdentifier(result.analyzer, idx, curr_name_idx);
+                        return maybe_decl;
+                    }
+                }
+            }
+
+            return DeclarationWithAnalyzer{ .analyzer = analyzer };
+        },
+        else => {
+            logger.info("HUH! {any}", .{tags[node_idx]});
+            return DeclarationWithAnalyzer{ .analyzer = analyzer };
+        },
+    };
+}
 
 pub const Declaration = struct {
     node_idx: Ast.Node.Index,
@@ -105,12 +222,14 @@ pub fn addSymbol(
     const name_token = utils.getDeclNameToken(tree, node_idx) orelse @panic("Cannot find decl name token");
 
     if (try analyzer.recorded_occurrences.fetchPut(analyzer.allocator, name_token, {})) |_| {
-        std.log.err("Encountered reoccuring entry symbol {s} @ token {d}", .{ symbol_name, name_token });
-        @panic("Reoccuring entry!");
+        logger.err("Encountered reoccuring entry symbol {s} @ token {d}", .{ symbol_name, name_token });
+        // @panic("Reoccuring entry!");
+        return error.Reocc;
+        // return;
     }
 
     var comments = try utils.getDocComments(analyzer.allocator, tree, node_idx);
-    std.log.info("{s}", .{symbol_name});
+    // logger.info("{s}", .{symbol_name});
     try analyzer.symbols.append(analyzer.allocator, .{
         .symbol = symbol_name,
         .documentation = comments orelse .{},
@@ -241,78 +360,6 @@ pub fn newContainerScope(
     }
 }
 
-pub fn resolveAndMarkDeclarationIdentifier(
-    analyzer: *Analyzer,
-    scope_idx: usize,
-    token_idx: Ast.TokenIndex,
-) std.mem.Allocator.Error!?Declaration {
-    const tree = analyzer.handle.tree;
-    const scope = analyzer.scopes.items[scope_idx];
-    const maybe_decl = scope.decls.get(tree.tokenSlice(token_idx)) orelse try analyzer.resolveAndMarkDeclarationIdentifier(scope.parent_scope_idx orelse return null, token_idx);
-
-    if (maybe_decl) |decl| {
-        if ((try analyzer.recorded_occurrences.fetchPut(analyzer.allocator, token_idx, {})) == null) {
-            var range_list = std.ArrayListUnmanaged(i32){};
-            try analyzer.fillRangeList(token_idx, &range_list);
-            try analyzer.occurrences.append(analyzer.allocator, .{
-                .range = range_list,
-                .symbol = decl.symbol,
-                .symbol_roles = 0,
-                .override_documentation = .{},
-                .syntax_kind = .identifier,
-                .diagnostics = .{},
-            });
-        }
-    }
-
-    return maybe_decl;
-}
-
-pub fn resolveAndMarkDeclarationComplex(
-    analyzer: *Analyzer,
-    scope_idx: usize,
-    node_idx: Ast.Node.Index,
-) std.mem.Allocator.Error!?Declaration {
-    const tree = analyzer.handle.tree;
-    const tags = tree.nodes.items(.tag);
-    const data = tree.nodes.items(.data);
-
-    return switch (tags[node_idx]) {
-        .identifier => analyzer.resolveAndMarkDeclarationIdentifier(scope_idx, tree.nodes.items(.main_token)[node_idx]),
-        .field_access => {
-            const curr_name_idx = data[node_idx].rhs;
-            const prev_node_idx = data[node_idx].lhs;
-
-            const scope_decl = (try analyzer.resolveAndMarkDeclarationComplex(scope_idx, prev_node_idx)) orelse return null;
-            std.log.info("A", .{});
-            for (analyzer.scopes.items) |scope, idx| {
-                if (scope.node_idx == scope_decl.data.variable.ast.init_node) {
-                    std.log.info("B", .{});
-                    const maybe_decl = analyzer.resolveAndMarkDeclarationIdentifier(idx, curr_name_idx);
-                    // if (maybe_decl) |decl| {
-                    //     if ((try analyzer.recorded_occurrences.fetchPut(analyzer.allocator, data[node_idx].rhs, {})) == null) {
-                    //         var range_list = std.ArrayListUnmanaged(i32){};
-                    //         try analyzer.fillRangeList(data[node_idx].rhs, &range_list);
-                    //         try analyzer.occurrences.append(analyzer.allocator, .{
-                    //             .range = range_list,
-                    //             .symbol = decl.symbol,
-                    //             .symbol_roles = 0,
-                    //             .override_documentation = .{},
-                    //             .syntax_kind = .identifier,
-                    //             .diagnostics = .{},
-                    //         });
-                    //     }
-                    // }
-                    return maybe_decl;
-                }
-            }
-
-            return null;
-        },
-        else => @panic("huh"),
-    };
-}
-
 pub fn scopeIntermediate(
     analyzer: *Analyzer,
     scope_idx: usize,
@@ -322,13 +369,18 @@ pub fn scopeIntermediate(
     const tree = analyzer.handle.tree;
     const tags = tree.nodes.items(.tag);
     const data = tree.nodes.items(.data);
+    const main_tokens = tree.nodes.items(.main_token);
     // const token_tags = tree.tokens.items(.tag);
 
-    std.log.info("{any}", .{tags[node_idx]});
+    // logger.info("{any}", .{tags[node_idx]});
+
+    // std.log.info("BBBBBBBBBBBBB {d}, {d}", .{ analyzer.scopes.items.len, analyzer.scopes.items[analyzer.scopes.items.len - 1].node_idx });
+
+    if (analyzer.scopes.items.len != 1 and analyzer.scopes.items[analyzer.scopes.items.len - 1].node_idx == 0) return error.abc;
 
     switch (tags[node_idx]) {
         .identifier => {
-            _ = try analyzer.resolveAndMarkDeclarationIdentifier(scope_idx, tree.nodes.items(.main_token)[node_idx]);
+            _ = try analyzer.resolveAndMarkDeclarationIdentifier(analyzer, scope_idx, main_tokens[node_idx]);
             // const src = tree.getNodeSource(node_idx);
             // if (analyzer.resolveAndMarkDeclarationInScopeIdentifier(scope_idx, src)) |decl| {
             //     // try analyzer.addOccurrence(, decl.symbol);
@@ -344,11 +396,11 @@ pub fn scopeIntermediate(
             //         .diagnostics = .{},
             //     });
             // }
-            // std.log.info("ID: {s}, {any}", .{ src,  });
+            // logger.info("ID: {s}, {any}", .{ src,  });
         },
         .field_access => {
-            // std.log.info("{s}", .{});
-            _ = try analyzer.resolveAndMarkDeclarationComplex(scope_idx, node_idx);
+            // logger.info("{s}", .{});
+            _ = try analyzer.resolveAndMarkDeclarationComplex(analyzer, scope_idx, node_idx);
             // try analyzer.scopeIntermediate(scope_idx, data[node_idx].lhs, scope_name);
             // try analyzer.scopeIntermediate(scope_idx, , scope_name);
         },
@@ -406,7 +458,7 @@ pub fn scopeIntermediate(
                 .node_idx = node_idx,
                 .data = .{ .function = func },
             };
-            decl.symbol = try analyzer.generateSymbol(scope_idx, decl, utils.getDeclName(analyzer.handle.tree, node_idx).?);
+            decl.symbol = try analyzer.generateSymbol(scope_idx, decl, utils.getDeclName(analyzer.handle.tree, node_idx) orelse return);
 
             try analyzer.addDeclaration(scope_idx, decl, null);
 
@@ -442,7 +494,8 @@ pub fn scopeIntermediate(
                 }
                 // Visit parameter types to pick up any error sets and enum
                 //   completions
-                try analyzer.scopeIntermediate(scope_idx, param.type_expr, scope_name);
+                if (param.type_expr != 0)
+                    try analyzer.scopeIntermediate(scope_idx, param.type_expr, scope_name);
             }
 
             if (fn_tag == .fn_decl) blk: {
@@ -450,11 +503,13 @@ pub fn scopeIntermediate(
                 const return_type_node = data[data[node_idx].lhs].rhs;
 
                 // Visit the return type
-                try analyzer.scopeIntermediate(func_scope_idx, return_type_node, func_scope_name);
+                if (return_type_node != 0)
+                    try analyzer.scopeIntermediate(func_scope_idx, return_type_node, func_scope_name);
             }
 
             // Visit the function body
-            try analyzer.scopeIntermediate(func_scope_idx, data[node_idx].rhs, func_scope_name);
+            if (data[node_idx].rhs != 0)
+                try analyzer.scopeIntermediate(func_scope_idx, data[node_idx].rhs, func_scope_name);
         },
         .block,
         .block_semicolon,
@@ -493,7 +548,7 @@ pub fn scopeIntermediate(
             const block_scope_idx = analyzer.scopes.items.len - 1;
 
             var buffer: [2]Ast.Node.Index = undefined;
-            const statements = utils.blockStatements(tree, node_idx, &buffer).?;
+            const statements = utils.blockStatements(tree, node_idx, &buffer) orelse return;
 
             for (statements) |idx| {
                 // TODO:
@@ -517,11 +572,13 @@ pub fn scopeIntermediate(
         .async_call_one_comma,
         => {
             var buf: [1]Ast.Node.Index = undefined;
-            const call = utils.callFull(tree, node_idx, &buf).?;
+            const call = utils.callFull(tree, node_idx, &buf) orelse return;
 
-            try analyzer.scopeIntermediate(scope_idx, call.ast.fn_expr, scope_name);
+            if (call.ast.fn_expr != 0)
+                try analyzer.scopeIntermediate(scope_idx, call.ast.fn_expr, scope_name);
             for (call.ast.params) |param|
-                try analyzer.scopeIntermediate(scope_idx, param, scope_name);
+                if (param != 0)
+                    try analyzer.scopeIntermediate(scope_idx, param, scope_name);
         },
         .equal_equal,
         .bang_equal,
@@ -574,8 +631,33 @@ pub fn scopeIntermediate(
         .array_access,
         .error_union,
         => {
-            try analyzer.scopeIntermediate(scope_idx, data[node_idx].lhs, scope_name);
-            try analyzer.scopeIntermediate(scope_idx, data[node_idx].rhs, scope_name);
+            if (data[node_idx].lhs != 0)
+                try analyzer.scopeIntermediate(scope_idx, data[node_idx].lhs, scope_name);
+            if (data[node_idx].rhs != 0)
+                try analyzer.scopeIntermediate(scope_idx, data[node_idx].rhs, scope_name);
+        },
+        .builtin_call,
+        .builtin_call_comma,
+        .builtin_call_two,
+        .builtin_call_two_comma,
+        => {
+            var buffer: [2]Ast.Node.Index = undefined;
+            const params = utils.builtinCallParams(tree, node_idx, &buffer).?;
+            const call_name = tree.tokenSlice(main_tokens[node_idx]);
+
+            if (std.mem.eql(u8, call_name, "@import")) {
+                const import_param = params[0];
+                const import_str = tree.tokenSlice(main_tokens[import_param]);
+
+                try analyzer.scopes.append(analyzer.allocator, .{
+                    .node_idx = node_idx,
+                    .parent_scope_idx = scope_idx,
+                    .range = nodeSourceRange(tree, node_idx),
+                    .data = .{
+                        .import = import_str[1 .. import_str.len - 1],
+                    },
+                });
+            }
         },
         else => {},
     }

@@ -6,7 +6,7 @@ const DocumentStore = @import("analysis/DocumentStore.zig");
 
 pub fn main() !void {
     var doc_store = DocumentStore{ .allocator = std.heap.page_allocator };
-    try doc_store.createPackage("root", "C:\\Programming\\Zig\\scip-zig\\test\\loris.zig");
+    try doc_store.createPackage("root", "C:\\Programming\\Zig\\scip-zig\\test\\luuk.zig");
     // _ = try doc_store.load(big_loris);
 
     // _ = try doc_store.getOrCreateHandle(big_loris);

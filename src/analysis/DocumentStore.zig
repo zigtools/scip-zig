@@ -1,6 +1,8 @@
 const std = @import("std");
 const Analyzer = @import("Analyzer.zig");
 
+const logger = std.log.scoped(.store);
+
 const DocumentStore = @This();
 
 allocator: std.mem.Allocator,
@@ -14,6 +16,7 @@ pub const Package = struct {
 };
 
 pub const Handle = struct {
+    document_store: *DocumentStore,
     package: []const u8,
     /// Relative to package root
     path: []const u8,
@@ -51,7 +54,9 @@ pub const Handle = struct {
 };
 
 pub fn createPackage(store: *DocumentStore, package: []const u8, root: []const u8) !void {
-    try store.packages.put(store.allocator, package, .{
+    if (store.packages.contains(package)) return;
+
+    try store.packages.put(store.allocator, try store.allocator.dupe(u8, package), .{
         .root = try store.allocator.dupe(u8, root),
     });
 
@@ -59,6 +64,7 @@ pub fn createPackage(store: *DocumentStore, package: []const u8, root: []const u
 }
 
 pub fn loadFile(store: *DocumentStore, package: []const u8, path: []const u8) !*Handle {
+    std.log.info("Loading {s}", .{path});
     std.debug.assert(!std.fs.path.isAbsolute(path)); // use relative path
 
     const package_entry = store.packages.getEntry(package).?;
@@ -86,21 +92,48 @@ pub fn loadFile(store: *DocumentStore, package: []const u8, path: []const u8) !*
     errdefer store.allocator.destroy(handle);
 
     handle.* = .{
+        .document_store = store,
         .package = package_entry.key_ptr.*,
-        .path = path,
+        .path = path_duped,
         .text = text,
         .tree = tree,
         .analyzer = .{ .allocator = store.allocator, .handle = handle },
     };
 
-    try handle.analyzer.init();
-
     try store.packages.getEntry(package).?.value_ptr.handles.put(store.allocator, path_duped, handle);
+
+    try handle.analyzer.init();
 
     return handle;
 }
 
-// pub fn resolveImport(store: *DocumentStore, handle: *Handle, import: []const u8) ![]const u8 {
+pub fn getOrLoadFile(store: *DocumentStore, package: []const u8, path: []const u8) anyerror!*Handle {
+    return store.packages.get(package).?.handles.get(path) orelse store.loadFile(package, path);
+}
+
+pub fn resolveImportHandle(store: *DocumentStore, handle: *Handle, import: []const u8) anyerror!?*Handle {
+    if (std.mem.endsWith(u8, import, ".zig")) {
+        std.log.info("AAAAAAAAAAA {s}", .{handle.path});
+        var rel = try std.fs.path.resolve(store.allocator, &[_][]const u8{ std.fs.path.dirname(store.packages.get(handle.package).?.root).?, handle.path, "..", import });
+        defer store.allocator.free(rel);
+
+        logger.info("Importing {s} @ {s} (basename {?s}, rel {s}) within package {s}", .{ import, handle.path, std.fs.path.dirname(handle.path), rel, handle.package });
+
+        return try store.getOrLoadFile(handle.package, rel[std.fs.path.dirname(store.packages.get(handle.package).?.root).?.len + 1 ..]);
+    } else {
+        // TODO: Custom packages
+
+        if (std.mem.eql(u8, import, "std")) {
+            try store.createPackage("std", "C:\\Programming\\Zig\\zig-windows-install\\lib\\std\\std.zig");
+            return store.packages.get("std").?.handles.get("std.zig").?;
+        }
+
+        return null;
+    }
+    //return store.packages.getEntry(import).?.value_ptr.handles.get(key: K)
+}
+
+// pub fn resolveImportPath(store: *DocumentStore, handle: *Handle, import: []const u8) ![]const u8 {
 //     _ = store;
 //     _ = handle;
 
