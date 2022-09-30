@@ -110,6 +110,11 @@ pub fn getDeclFromScopeByName(
     return DeclarationWithAnalyzer{ .analyzer = ts.analyzer, .declaration = ts.analyzer.scopes.items[ts.scope_idx].decls.get(name) };
 }
 
+pub fn formatSubSymbol(analyzer: *Analyzer, symbol: []const u8) []const u8 {
+    _ = analyzer;
+    return if (std.mem.startsWith(u8, symbol, "@\"")) symbol[2 .. symbol.len - 1] else symbol;
+}
+
 pub fn resolveAndMarkDeclarationIdentifier(
     analyzer: *Analyzer,
     foreign_analyzer: *Analyzer,
@@ -121,7 +126,7 @@ pub fn resolveAndMarkDeclarationIdentifier(
 
     var dwa = try foreign_analyzer.getDeclFromScopeByName(scope_idx, tree.tokenSlice(token_idx));
     if (dwa.declaration == null)
-        dwa = try analyzer.resolveAndMarkDeclarationIdentifier(foreign_analyzer, if (scope_idx > analyzer.scopes.items.len) return DeclarationWithAnalyzer{ .analyzer = analyzer } else analyzer.scopes.items[scope_idx].parent_scope_idx orelse return DeclarationWithAnalyzer{ .analyzer = analyzer }, token_idx);
+        dwa = try analyzer.resolveAndMarkDeclarationIdentifier(foreign_analyzer, if (scope_idx > analyzer.scopes.items.len) return DeclarationWithAnalyzer{ .analyzer = analyzer } else foreign_analyzer.scopes.items[scope_idx].parent_scope_idx orelse return DeclarationWithAnalyzer{ .analyzer = analyzer }, token_idx);
 
     if (dwa.declaration) |decl| {
         if ((try analyzer.recorded_occurrences.fetchPut(analyzer.allocator, token_idx, {})) == null) {
@@ -265,8 +270,8 @@ pub fn generateSymbol(
             else => @panic("never gonna let you down"),
         },
         .container => switch (declaration.data) {
-            .function => try std.mem.concat(analyzer.allocator, u8, &.{ scope.data.container.descriptor, name, "()." }),
-            else => try std.mem.concat(analyzer.allocator, u8, &.{ scope.data.container.descriptor, name, "#" }),
+            .function => try std.mem.concat(analyzer.allocator, u8, &.{ scope.data.container.descriptor, "`", analyzer.formatSubSymbol(name), "`", "()." }),
+            else => try std.mem.concat(analyzer.allocator, u8, &.{ scope.data.container.descriptor, "`", analyzer.formatSubSymbol(name), "`", "#" }),
         },
         else => @panic("never gonna give you up."),
     };
@@ -313,9 +318,9 @@ pub fn newContainerScope(
                     try std.fmt.allocPrint(analyzer.allocator, "file . {s} unversioned {s}", .{ analyzer.handle.package, analyzer.handle.formatter() })
                 else
                     (if (analyzer.getDescriptor(maybe_parent_scope_idx)) |desc|
-                        try std.mem.concat(analyzer.allocator, u8, &.{ desc, scope_name orelse @panic("amogus"), "#" })
+                        try std.mem.concat(analyzer.allocator, u8, &.{ desc, "`", analyzer.formatSubSymbol(scope_name orelse @panic("amogus")), "`", "#" })
                     else
-                        try std.fmt.allocPrint(analyzer.allocator, "file . {s} unversioned {d} ", .{ analyzer.handle.package, 69 })),
+                        try std.fmt.allocPrint(analyzer.allocator, "file . {s} unversioned ", .{analyzer.handle.package})),
                 .node_idx = node_idx,
             },
         },
@@ -352,7 +357,7 @@ pub fn newContainerScope(
                 _ = curr;
                 @panic("This shouldn't happen!");
             } else {
-                try analyzer.addSymbol(member, try std.mem.concat(analyzer.allocator, u8, &.{ analyzer.scopes.items[scope_idx].data.container.descriptor, utils.getDeclName(tree, member) orelse @panic("Cannot create declaration name"), "." }));
+                try analyzer.addSymbol(member, try std.mem.concat(analyzer.allocator, u8, &.{ analyzer.scopes.items[scope_idx].data.container.descriptor, analyzer.formatSubSymbol(utils.getDeclName(tree, member) orelse @panic("Cannot create declaration name")), "." }));
             }
         } else {
             try analyzer.scopeIntermediate(scope_idx, member, name);
@@ -466,7 +471,7 @@ pub fn scopeIntermediate(
                 try std.fmt.allocPrint(analyzer.allocator, "file . {s} unversioned {s}", .{ analyzer.handle.package, analyzer.handle.formatter() })
             else
                 (if (analyzer.getDescriptor(scope_idx)) |desc|
-                    try std.mem.concat(analyzer.allocator, u8, &.{ desc, scope_name orelse @panic("amogus"), "()." })
+                    try std.mem.concat(analyzer.allocator, u8, &.{ desc, analyzer.formatSubSymbol(scope_name orelse @panic("amogus")), "()." })
                 else
                     try std.fmt.allocPrint(analyzer.allocator, "file . {s} unversioned {d} ", .{ analyzer.handle.package, 69 }));
 
@@ -498,14 +503,16 @@ pub fn scopeIntermediate(
                     try analyzer.scopeIntermediate(scope_idx, param.type_expr, scope_name);
             }
 
-            if (fn_tag == .fn_decl) blk: {
-                if (data[node_idx].lhs == 0) break :blk;
-                const return_type_node = data[data[node_idx].lhs].rhs;
+            // TODO: Fix scoping issue here
+            _ = fn_tag;
+            // if (fn_tag == .fn_decl) blk: {
+            //     if (data[node_idx].lhs == 0) break :blk;
+            //     const return_type_node = data[data[node_idx].lhs].rhs;
 
-                // Visit the return type
-                if (return_type_node != 0)
-                    try analyzer.scopeIntermediate(func_scope_idx, return_type_node, func_scope_name);
-            }
+            //     // Visit the return type
+            //     if (return_type_node != 0)
+            //         try analyzer.scopeIntermediate(func_scope_idx, return_type_node, func_scope_name);
+            // }
 
             // Visit the function body
             if (data[node_idx].rhs != 0)
@@ -657,6 +664,9 @@ pub fn scopeIntermediate(
                         .import = import_str[1 .. import_str.len - 1],
                     },
                 });
+
+                // _ = analyzer.resolveAndMarkDeclarationComplex(analyzer, scope_idx, node_idx);
+                _ = try analyzer.handle.document_store.resolveImportHandle(analyzer.handle, import_str[1 .. import_str.len - 1]);
             }
         },
         else => {},

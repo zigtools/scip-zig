@@ -6,7 +6,8 @@ const DocumentStore = @import("analysis/DocumentStore.zig");
 
 pub fn main() !void {
     var doc_store = DocumentStore{ .allocator = std.heap.page_allocator };
-    try doc_store.createPackage("root", "C:\\Programming\\Zig\\scip-zig\\test\\luuk.zig");
+    // try doc_store.createPackage("root", "C:\\Programming\\Zig\\scip-zig\\test\\luuk.zig");
+    try doc_store.createPackage("std", "C:\\Programming\\Zig\\zig-windows-install\\lib\\std\\std.zig");
     // _ = try doc_store.load(big_loris);
 
     // _ = try doc_store.getOrCreateHandle(big_loris);
@@ -29,7 +30,8 @@ pub fn main() !void {
                 .version = "unversioned",
                 .arguments = .{},
             },
-            .project_root = "file:///mnt/c/Programming/Zig/scip-zig/test",
+            // .project_root = "file:///mnt/c/Programming/Zig/scip-zig/test",
+            .project_root = "file:///mnt/c/Programming/Zig/zig-windows-install/lib/std",
             .text_document_encoding = .utf8,
         },
         .documents = documents,
@@ -42,4 +44,10 @@ pub fn main() !void {
 
     var z = try protobruh.decode(scip.Index, std.heap.page_allocator, my_test_index2.reader());
     std.log.info("AAA: {any}", .{z.documents.items});
+
+    // for (z.documents.items) |docu| {
+    //     for (docu.symbols.items) |symbi| {
+    //         try std.io.getStdOut().writer().print("{s}\n", .{symbi.symbol});
+    //     }
+    // }
 }
