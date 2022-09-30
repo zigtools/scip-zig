@@ -38,7 +38,10 @@ pub const Scope = struct {
             node_idx: Ast.Node.Index,
             fields: std.StringHashMapUnmanaged(Field) = .{},
         }, // .tag is ContainerDecl or Root or ErrorSetDecl
-        function: Ast.Node.Index, // .tag is FnProto
+        function: struct {
+            descriptor: []const u8,
+            node_idx: Ast.Node.Index,
+        }, // .tag is FnProto
         block: Ast.Node.Index, // .tag is Block
         // TODO: Is this really the most efficient way?
         import: []const u8,
@@ -126,7 +129,15 @@ pub fn resolveAndMarkDeclarationIdentifier(
 
     var dwa = try foreign_analyzer.getDeclFromScopeByName(scope_idx, tree.tokenSlice(token_idx));
     if (dwa.declaration == null)
-        dwa = try analyzer.resolveAndMarkDeclarationIdentifier(foreign_analyzer, if (scope_idx > analyzer.scopes.items.len) return DeclarationWithAnalyzer{ .analyzer = analyzer } else foreign_analyzer.scopes.items[scope_idx].parent_scope_idx orelse return DeclarationWithAnalyzer{ .analyzer = analyzer }, token_idx);
+        dwa = try analyzer.resolveAndMarkDeclarationIdentifier(
+            foreign_analyzer,
+            if (scope_idx > foreign_analyzer.scopes.items.len)
+                return DeclarationWithAnalyzer{ .analyzer = analyzer }
+            else
+                foreign_analyzer.scopes.items[scope_idx].parent_scope_idx orelse
+                    return DeclarationWithAnalyzer{ .analyzer = analyzer },
+            token_idx,
+        );
 
     if (dwa.declaration) |decl| {
         if ((try analyzer.recorded_occurrences.fetchPut(analyzer.allocator, token_idx, {})) == null) {
@@ -201,10 +212,11 @@ pub const Field = struct {
 pub fn getDescriptor(analyzer: *Analyzer, maybe_scope_idx: ?usize) ?[]const u8 {
     if (maybe_scope_idx) |scope_idx| {
         var scope = analyzer.scopes.items[scope_idx];
-        return if (scope.data != .container)
-            null
-        else
-            scope.data.container.descriptor;
+        return switch (scope.data) {
+            .container => |container| container.descriptor,
+            .function => |function| function.descriptor,
+            else => null,
+        };
     } else return null;
 }
 
@@ -481,7 +493,7 @@ pub fn scopeIntermediate(
                 .parent_scope_idx = scope_idx,
                 .range = nodeSourceRange(tree, node_idx),
                 .data = .{
-                    .container = .{
+                    .function = .{
                         .descriptor = func_scope_name,
                         .node_idx = node_idx,
                     },
@@ -504,19 +516,19 @@ pub fn scopeIntermediate(
             }
 
             // TODO: Fix scoping issue here
-            _ = fn_tag;
-            // if (fn_tag == .fn_decl) blk: {
-            //     if (data[node_idx].lhs == 0) break :blk;
-            //     const return_type_node = data[data[node_idx].lhs].rhs;
+            // _ = fn_tag;
+            if (fn_tag == .fn_decl) blk: {
+                if (data[node_idx].lhs == 0) break :blk;
+                const return_type_node = data[data[node_idx].lhs].rhs;
 
-            //     // Visit the return type
-            //     if (return_type_node != 0)
-            //         try analyzer.scopeIntermediate(func_scope_idx, return_type_node, func_scope_name);
-            // }
+                // Visit the return type
+                if (return_type_node != 0)
+                    try analyzer.scopeIntermediate(func_scope_idx, return_type_node, scope_name);
+            }
 
             // Visit the function body
             if (data[node_idx].rhs != 0)
-                try analyzer.scopeIntermediate(func_scope_idx, data[node_idx].rhs, func_scope_name);
+                try analyzer.scopeIntermediate(func_scope_idx, data[node_idx].rhs, scope_name);
         },
         .block,
         .block_semicolon,
