@@ -104,6 +104,7 @@ pub fn resolveTrueScopeIndex(
 pub const DeclarationWithAnalyzer = struct {
     analyzer: *Analyzer,
     declaration: ?Declaration = null,
+    scope_idx: usize,
 };
 
 pub fn getDeclFromScopeByName(
@@ -111,9 +112,13 @@ pub fn getDeclFromScopeByName(
     scope_idx: usize,
     name: []const u8,
 ) anyerror!DeclarationWithAnalyzer {
-    var ts = (try analyzer.resolveTrueScopeIndex(scope_idx)) orelse return DeclarationWithAnalyzer{ .analyzer = analyzer };
-    if (ts.analyzer.scopes.items.len == 0) return DeclarationWithAnalyzer{ .analyzer = ts.analyzer };
-    return DeclarationWithAnalyzer{ .analyzer = ts.analyzer, .declaration = ts.analyzer.scopes.items[ts.scope_idx].decls.get(name) };
+    var ts = (try analyzer.resolveTrueScopeIndex(scope_idx)) orelse return DeclarationWithAnalyzer{ .analyzer = analyzer, .scope_idx = scope_idx };
+    if (ts.analyzer.scopes.items.len == 0) return DeclarationWithAnalyzer{ .analyzer = ts.analyzer, .scope_idx = ts.scope_idx };
+    return DeclarationWithAnalyzer{
+        .analyzer = ts.analyzer,
+        .declaration = ts.analyzer.scopes.items[ts.scope_idx].decls.get(name),
+        .scope_idx = ts.scope_idx,
+    };
 }
 
 pub fn formatSubSymbol(analyzer: *Analyzer, symbol: []const u8) []const u8 {
@@ -132,22 +137,19 @@ pub fn resolveAndMarkDeclarationIdentifier(
 
     var dwa = try foreign_analyzer.getDeclFromScopeByName(scope_idx, tree.tokenSlice(token_idx));
     if (dwa.declaration == null)
-        dwa = try analyzer.resolveAndMarkDeclarationIdentifier(
-            foreign_analyzer,
-            if (scope_idx > foreign_analyzer.scopes.items.len)
-                return DeclarationWithAnalyzer{ .analyzer = foreign_analyzer }
-            else r: {
-                const maybe_rtsi = try foreign_analyzer.resolveTrueScopeIndex(scope_idx);
-                if (maybe_rtsi) |rtsi| {
-                    if (rtsi.analyzer.scopes.items[rtsi.scope_idx].parent_scope_idx) |psi| {
-                        break :r psi;
-                    }
+        dwa =
+            if (dwa.scope_idx > foreign_analyzer.scopes.items.len)
+            return DeclarationWithAnalyzer{ .analyzer = foreign_analyzer, .scope_idx = scope_idx }
+        else r: {
+            const maybe_rtsi = try foreign_analyzer.resolveTrueScopeIndex(scope_idx);
+            if (maybe_rtsi) |rtsi| {
+                if (rtsi.analyzer.scopes.items[rtsi.scope_idx].parent_scope_idx) |psi| {
+                    break :r try analyzer.resolveAndMarkDeclarationIdentifier(rtsi.analyzer, psi, token_idx);
                 }
+            }
 
-                return DeclarationWithAnalyzer{ .analyzer = foreign_analyzer };
-            },
-            token_idx,
-        );
+            return DeclarationWithAnalyzer{ .analyzer = foreign_analyzer, .scope_idx = if (maybe_rtsi) |m| m.scope_idx else 0 };
+        };
 
     if (dwa.declaration) |decl| {
         if ((try analyzer.recorded_occurrences.fetchPut(analyzer.allocator, token_idx, {})) == null) {
@@ -177,6 +179,7 @@ pub fn resolveAndMarkDeclarationComplex(
     const tags = tree.nodes.items(.tag);
     const data = tree.nodes.items(.data);
 
+    if (node_idx >= tags.len) std.log.err("BRUH {d}", .{node_idx});
     return switch (tags[node_idx]) {
         .identifier => analyzer.resolveAndMarkDeclarationIdentifier(foreign_analyzer, scope_idx, tree.nodes.items(.main_token)[node_idx]),
         .field_access => {
@@ -184,7 +187,25 @@ pub fn resolveAndMarkDeclarationComplex(
             const prev_node_idx = data[node_idx].lhs;
 
             // const scope_decl = () orelse return .{ .analyzer = analyzer };
-            const result = try analyzer.resolveAndMarkDeclarationComplex(foreign_analyzer, scope_idx, prev_node_idx);
+            var result = try analyzer.resolveAndMarkDeclarationComplex(foreign_analyzer, scope_idx, prev_node_idx);
+            if (result.declaration) |decl|
+                switch (result.analyzer.handle.tree.nodes.items(.tag)[decl.node_idx]) {
+                    .global_var_decl,
+                    .local_var_decl,
+                    .aligned_var_decl,
+                    .simple_var_decl,
+                    => {
+                        const var_decl = utils.varDecl(result.analyzer.handle.tree, decl.node_idx).?;
+
+                        switch (result.analyzer.handle.tree.nodes.items(.tag)[var_decl.ast.init_node]) {
+                            .identifier, .field_access => {
+                                result = try result.analyzer.resolveAndMarkDeclarationComplex(result.analyzer, result.scope_idx, var_decl.ast.init_node);
+                            },
+                            else => {},
+                        }
+                    },
+                    else => {},
+                };
             if (result.declaration) |scope_decl| {
                 for (result.analyzer.scopes.items) |scope, idx| {
                     if (scope.node_idx == scope_decl.data.variable.ast.init_node) {
@@ -195,11 +216,11 @@ pub fn resolveAndMarkDeclarationComplex(
                 }
             }
 
-            return DeclarationWithAnalyzer{ .analyzer = analyzer };
+            return DeclarationWithAnalyzer{ .analyzer = analyzer, .scope_idx = scope_idx };
         },
         else => {
             // logger.info("HUH! {any}", .{tags[node_idx]});
-            return DeclarationWithAnalyzer{ .analyzer = analyzer };
+            return DeclarationWithAnalyzer{ .analyzer = analyzer, .scope_idx = scope_idx };
         },
     };
 }
