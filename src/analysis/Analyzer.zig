@@ -22,6 +22,9 @@ occurrences: std.ArrayListUnmanaged(scip.Occurrence) = .{},
 
 local_counter: usize = 0,
 
+post_resolves: std.ArrayListUnmanaged(PostResolve) = .{},
+const PostResolve = struct { scope_idx: usize, node_idx: Ast.Node.Index };
+
 // TODO: Make scope map to avoid scope duplication, decrease lookup times
 
 pub fn init(analyzer: *Analyzer) !void {
@@ -132,10 +135,17 @@ pub fn resolveAndMarkDeclarationIdentifier(
         dwa = try analyzer.resolveAndMarkDeclarationIdentifier(
             foreign_analyzer,
             if (scope_idx > foreign_analyzer.scopes.items.len)
-                return DeclarationWithAnalyzer{ .analyzer = analyzer }
-            else
-                foreign_analyzer.scopes.items[scope_idx].parent_scope_idx orelse
-                    return DeclarationWithAnalyzer{ .analyzer = analyzer },
+                return DeclarationWithAnalyzer{ .analyzer = foreign_analyzer }
+            else r: {
+                const maybe_rtsi = try foreign_analyzer.resolveTrueScopeIndex(scope_idx);
+                if (maybe_rtsi) |rtsi| {
+                    if (rtsi.analyzer.scopes.items[rtsi.scope_idx].parent_scope_idx) |psi| {
+                        break :r psi;
+                    }
+                }
+
+                return DeclarationWithAnalyzer{ .analyzer = foreign_analyzer };
+            },
             token_idx,
         );
 
@@ -179,6 +189,7 @@ pub fn resolveAndMarkDeclarationComplex(
                 for (result.analyzer.scopes.items) |scope, idx| {
                     if (scope.node_idx == scope_decl.data.variable.ast.init_node) {
                         const maybe_decl = try analyzer.resolveAndMarkDeclarationIdentifier(result.analyzer, idx, curr_name_idx);
+                        if (maybe_decl.declaration == null) logger.warn("Lookup failure while searching for {s} from {s}", .{ tree.getNodeSource(node_idx), analyzer.handle.path });
                         return maybe_decl;
                     }
                 }
@@ -187,7 +198,7 @@ pub fn resolveAndMarkDeclarationComplex(
             return DeclarationWithAnalyzer{ .analyzer = analyzer };
         },
         else => {
-            logger.info("HUH! {any}", .{tags[node_idx]});
+            // logger.info("HUH! {any}", .{tags[node_idx]});
             return DeclarationWithAnalyzer{ .analyzer = analyzer };
         },
     };
@@ -319,6 +330,29 @@ pub fn newContainerScope(
 ) !void {
     const tree = analyzer.handle.tree;
 
+    for (tree.nodes.items(.tag)) |tag, i| {
+        switch (tag) {
+            .builtin_call,
+            .builtin_call_comma,
+            .builtin_call_two,
+            .builtin_call_two_comma,
+            => {
+                var buffer: [2]Ast.Node.Index = undefined;
+                const params = utils.builtinCallParams(tree, @intCast(Ast.Node.Index, i), &buffer).?;
+
+                if (std.mem.eql(u8, tree.tokenSlice(tree.nodes.items(.main_token)[i]), "@import")) {
+                    if (params.len == 0) continue;
+                    const import_param = params[0];
+                    if (tree.nodes.items(.tag)[import_param] != .string_literal) continue;
+
+                    const import_str = tree.tokenSlice(tree.nodes.items(.main_token)[import_param]);
+                    _ = try analyzer.handle.document_store.resolveImportHandle(analyzer.handle, import_str[1 .. import_str.len - 1]);
+                }
+            },
+            else => {},
+        }
+    }
+
     var scope = try analyzer.scopes.addOne(analyzer.allocator);
     scope.* = .{
         .node_idx = node_idx,
@@ -366,7 +400,8 @@ pub fn newContainerScope(
                 name,
                 field,
             )) |curr| {
-                _ = curr;
+                // _ = curr;
+                std.log.info("Current: {any}", .{curr});
                 @panic("This shouldn't happen!");
             } else {
                 try analyzer.addSymbol(member, try std.mem.concat(analyzer.allocator, u8, &.{ analyzer.scopes.items[scope_idx].data.container.descriptor, analyzer.formatSubSymbol(utils.getDeclName(tree, member) orelse @panic("Cannot create declaration name")), "." }));
@@ -374,6 +409,12 @@ pub fn newContainerScope(
         } else {
             try analyzer.scopeIntermediate(scope_idx, member, name);
         }
+    }
+}
+
+pub fn postResolves(analyzer: *Analyzer) !void {
+    for (analyzer.post_resolves.items) |pr| {
+        _ = try analyzer.resolveAndMarkDeclarationComplex(analyzer, pr.scope_idx, pr.node_idx);
     }
 }
 
@@ -396,30 +437,12 @@ pub fn scopeIntermediate(
     if (analyzer.scopes.items.len != 1 and analyzer.scopes.items[analyzer.scopes.items.len - 1].node_idx == 0) return error.abc;
 
     switch (tags[node_idx]) {
-        .identifier => {
-            _ = try analyzer.resolveAndMarkDeclarationIdentifier(analyzer, scope_idx, main_tokens[node_idx]);
-            // const src = tree.getNodeSource(node_idx);
-            // if (analyzer.resolveAndMarkDeclarationInScopeIdentifier(scope_idx, src)) |decl| {
-            //     // try analyzer.addOccurrence(, decl.symbol);
-            //     // TODO: Check if it's already logged
-            //     var range_list = std.ArrayListUnmanaged(i32){};
-            //     try analyzer.fillRangeList(tree.nodes.items(.main_token)[node_idx], &range_list);
-            //     try analyzer.occurrences.append(analyzer.allocator, .{
-            //         .range = range_list,
-            //         .symbol = decl.symbol,
-            //         .symbol_roles = 0,
-            //         .override_documentation = .{},
-            //         .syntax_kind = .identifier,
-            //         .diagnostics = .{},
-            //     });
-            // }
-            // logger.info("ID: {s}, {any}", .{ src,  });
-        },
-        .field_access => {
-            // logger.info("{s}", .{});
-            _ = try analyzer.resolveAndMarkDeclarationComplex(analyzer, scope_idx, node_idx);
-            // try analyzer.scopeIntermediate(scope_idx, data[node_idx].lhs, scope_name);
-            // try analyzer.scopeIntermediate(scope_idx, , scope_name);
+        // .identifier => {
+        // _ = try analyzer.resolveAndMarkDeclarationIdentifier(analyzer, scope_idx, main_tokens[node_idx]);
+        // },
+        .identifier, .field_access => {
+            try analyzer.post_resolves.append(analyzer.allocator, .{ .scope_idx = scope_idx, .node_idx = node_idx });
+            // _ = try analyzer.resolveAndMarkDeclarationComplex(analyzer, scope_idx, node_idx);
         },
         .container_decl,
         .container_decl_trailing,
@@ -678,7 +701,7 @@ pub fn scopeIntermediate(
                 });
 
                 // _ = analyzer.resolveAndMarkDeclarationComplex(analyzer, scope_idx, node_idx);
-                _ = try analyzer.handle.document_store.resolveImportHandle(analyzer.handle, import_str[1 .. import_str.len - 1]);
+                // _ = try analyzer.handle.document_store.resolveImportHandle(analyzer.handle, import_str[1 .. import_str.len - 1]);
             }
         },
         else => {},

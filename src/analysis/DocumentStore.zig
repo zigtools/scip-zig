@@ -113,11 +113,10 @@ pub fn getOrLoadFile(store: *DocumentStore, package: []const u8, path: []const u
 
 pub fn resolveImportHandle(store: *DocumentStore, handle: *Handle, import: []const u8) anyerror!?*Handle {
     if (std.mem.endsWith(u8, import, ".zig")) {
-        std.log.info("AAAAAAAAAAA {s}", .{handle.path});
         var rel = try std.fs.path.resolve(store.allocator, &[_][]const u8{ std.fs.path.dirname(store.packages.get(handle.package).?.root).?, handle.path, "..", import });
         defer store.allocator.free(rel);
 
-        logger.info("Importing {s} @ {s} (basename {?s}, rel {s}) within package {s}", .{ import, handle.path, std.fs.path.dirname(handle.path), rel, handle.package });
+        // logger.info("Importing {s} @ {s} (basename {?s}, rel {s}) within package {s}", .{ import, handle.path, std.fs.path.dirname(handle.path), rel, handle.package });
 
         return try store.getOrLoadFile(handle.package, rel[std.fs.path.dirname(store.packages.get(handle.package).?.root).?.len + 1 ..]);
     } else {

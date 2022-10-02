@@ -8,6 +8,11 @@ pub fn main() !void {
     var doc_store = DocumentStore{ .allocator = std.heap.page_allocator };
     // try doc_store.createPackage("root", "C:\\Programming\\Zig\\scip-zig\\test\\luuk.zig");
     try doc_store.createPackage("std", "C:\\Programming\\Zig\\zig-windows-install\\lib\\std\\std.zig");
+    var it = doc_store.packages.get("std").?.handles.iterator();
+    while (it.next()) |i| {
+        try i.value_ptr.*.analyzer.postResolves();
+    }
+
     // _ = try doc_store.load(big_loris);
 
     // _ = try doc_store.getOrCreateHandle(big_loris);
@@ -20,7 +25,7 @@ pub fn main() !void {
 
     var documents = try StoreToScip.storeToScip(std.heap.page_allocator, &doc_store);
 
-    std.log.info("{any}", .{documents});
+    // std.log.info("{any}", .{documents});
 
     try protobruh.encode(scip.Index{
         .metadata = .{
@@ -40,10 +45,10 @@ pub fn main() !void {
 
     my_test_index.close();
 
-    var my_test_index2 = try std.fs.cwd().openFile("my_test_index.scip", .{});
+    // var my_test_index2 = try std.fs.cwd().openFile("my_test_index.scip", .{});
 
-    var z = try protobruh.decode(scip.Index, std.heap.page_allocator, my_test_index2.reader());
-    std.log.info("AAA: {any}", .{z.documents.items});
+    // var z = try protobruh.decode(scip.Index, std.heap.page_allocator, my_test_index2.reader());
+    // std.log.info("AAA: {any}", .{z.documents.items});
 
     // for (z.documents.items) |docu| {
     //     for (docu.symbols.items) |symbi| {
