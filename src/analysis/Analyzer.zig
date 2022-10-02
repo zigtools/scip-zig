@@ -699,6 +699,58 @@ pub fn scopeIntermediate(
             if (data[node_idx].rhs != 0)
                 try analyzer.scopeIntermediate(scope_idx, data[node_idx].rhs, scope_name);
         },
+        .@"return",
+        .@"resume",
+        .@"suspend",
+        .deref,
+        .@"try",
+        .@"await",
+        .optional_type,
+        .@"comptime",
+        .@"nosuspend",
+        .bool_not,
+        .negation,
+        .bit_not,
+        .negation_wrap,
+        .address_of,
+        .grouped_expression,
+        .unwrap_optional,
+        .@"usingnamespace",
+        => {
+            if (data[node_idx].lhs != 0)
+                try analyzer.scopeIntermediate(scope_idx, data[node_idx].lhs, scope_name);
+        },
+        .@"if",
+        .if_simple,
+        => {
+            // TODO: Handle payload, create scopes
+            const if_node = utils.ifFull(tree, node_idx);
+
+            if (if_node.ast.cond_expr != 0)
+                try analyzer.scopeIntermediate(scope_idx, if_node.ast.cond_expr, scope_name);
+
+            try analyzer.scopeIntermediate(scope_idx, if_node.ast.then_expr, scope_name);
+            if (if_node.ast.else_expr != 0)
+                try analyzer.scopeIntermediate(scope_idx, if_node.ast.else_expr, scope_name);
+        },
+        .@"while",
+        .while_simple,
+        .while_cont,
+        .@"for",
+        .for_simple,
+        => {
+            // TODO: Handle payload, create scopes
+
+            const while_node = utils.whileAst(tree, node_idx).?;
+            const is_for = tags[node_idx] == .@"for" or tags[node_idx] == .for_simple;
+            _ = is_for;
+
+            if (while_node.ast.cond_expr != 0)
+                try analyzer.scopeIntermediate(scope_idx, while_node.ast.cond_expr, scope_name);
+            try analyzer.scopeIntermediate(scope_idx, while_node.ast.then_expr, scope_name);
+            if (while_node.ast.else_expr != 0)
+                try analyzer.scopeIntermediate(scope_idx, while_node.ast.else_expr, scope_name);
+        },
         .builtin_call,
         .builtin_call_comma,
         .builtin_call_two,
@@ -707,6 +759,9 @@ pub fn scopeIntermediate(
             var buffer: [2]Ast.Node.Index = undefined;
             const params = utils.builtinCallParams(tree, node_idx, &buffer).?;
             const call_name = tree.tokenSlice(main_tokens[node_idx]);
+
+            for (params) |p|
+                try analyzer.scopeIntermediate(scope_idx, p, scope_name);
 
             if (std.mem.eql(u8, call_name, "@import")) {
                 const import_param = params[0];
