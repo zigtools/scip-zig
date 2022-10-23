@@ -438,6 +438,8 @@ pub fn lastToken(tree: Ast, node: Ast.Node.Index) Ast.TokenIndex {
         .array_type,
         .switch_case_one,
         .switch_case,
+        .switch_case_inline_one,
+        .switch_case_inline,
         .switch_range,
         => n = datas[n].rhs,
 
@@ -1385,7 +1387,7 @@ const reserved_escapes = blk: {
 };
 
 /// Returns a URI from a path, caller owns the memory allocated with `allocator`
-fn fromPath(allocator: std.mem.Allocator, path: []const u8) ![]const u8 {
+pub fn fromPath(allocator: std.mem.Allocator, path: []const u8) ![]const u8 {
     if (path.len == 0) return "";
     const prefix = if (builtin.os.tag == .windows) "file:///" else "file://";
 
