@@ -5,12 +5,11 @@ const DocumentStore = @import("analysis/DocumentStore.zig");
 
 const analysis_utils = @import("analysis/utils.zig");
 
-pub fn storeToScip(allocator: std.mem.Allocator, store: *DocumentStore) !std.ArrayListUnmanaged(scip.Document) {
+// TODO: Support external type info
+pub fn storeToScip(allocator: std.mem.Allocator, store: *DocumentStore, pkg: []const u8) !std.ArrayListUnmanaged(scip.Document) {
     var documents = std.ArrayListUnmanaged(scip.Document){};
 
-    std.log.info("{s}", .{store.packages.get("std").?.root});
-
-    var docit = store.packages.get("std").?.handles.iterator();
+    var docit = store.packages.get(pkg).?.handles.iterator();
     while (docit.next()) |entry| {
         var handle = entry.value_ptr.*;
         var document = try documents.addOne(allocator);

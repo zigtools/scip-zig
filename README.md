@@ -28,6 +28,6 @@ To install `scip-zig`, simply `git clone` this repository and run `zig build`; y
 ## Usage
 
 ```bash
-# To index std
+# To index std; currently uses about a gigabyte of memory - beware!
 scip-zig --pkg std /path/to/std/std.zig --root std
 ```

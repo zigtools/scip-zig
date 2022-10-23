@@ -421,9 +421,7 @@ pub fn newContainerScope(
                 name,
                 field,
             )) |curr| {
-                // _ = curr;
-                std.log.info("Current: {any}", .{curr});
-                @panic("This shouldn't happen!");
+                std.log.info("Duplicate field, handling regardless: {any}", .{curr});
             } else {
                 try analyzer.addSymbol(member, try std.mem.concat(analyzer.allocator, u8, &.{ analyzer.scopes.items[scope_idx].data.container.descriptor, analyzer.formatSubSymbol(utils.getDeclName(tree, member) orelse @panic("Cannot create declaration name")), "." }));
             }

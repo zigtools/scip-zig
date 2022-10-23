@@ -63,7 +63,7 @@ pub fn main() !void {
     var index = try std.fs.cwd().createFile("index.scip", .{});
     defer index.close();
 
-    var documents = try StoreToScip.storeToScip(allocator, &doc_store);
+    var documents = try StoreToScip.storeToScip(allocator, &doc_store, root_name.?);
 
     var arg_reiterator = try std.process.ArgIterator.initWithAllocator(allocator);
     defer arg_reiterator.deinit();
