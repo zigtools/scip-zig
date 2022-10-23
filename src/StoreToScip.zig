@@ -16,6 +16,7 @@ pub fn storeToScip(allocator: std.mem.Allocator, store: *DocumentStore, pkg: []c
 
         document.* = .{
             .language = "zig",
+            // TODO: Investigate a good solution
             .relative_path = try std.mem.replaceOwned(u8, allocator, entry.key_ptr.*, "\\", "/"),
             .occurrences = handle.analyzer.occurrences,
             .symbols = handle.analyzer.symbols,

@@ -80,7 +80,7 @@ pub fn main() !void {
                     break :args arguments;
                 },
             },
-            .project_root = try utils.fromPath(allocator, std.fs.path.basename(doc_store.packages.get(root_name.?).?.root)),
+            .project_root = try utils.fromPath(allocator, std.fs.path.dirname(doc_store.packages.get(root_name.?).?.root).?),
             .text_document_encoding = .utf8,
         },
         .documents = documents,

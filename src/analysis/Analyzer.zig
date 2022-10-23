@@ -153,10 +153,8 @@ pub fn resolveAndMarkDeclarationIdentifier(
 
     if (dwa.declaration) |decl| {
         if ((try analyzer.recorded_occurrences.fetchPut(analyzer.allocator, token_idx, {})) == null) {
-            var range_list = std.ArrayListUnmanaged(i32){};
-            try analyzer.fillRangeList(token_idx, &range_list);
             try analyzer.occurrences.append(analyzer.allocator, .{
-                .range = range_list,
+                .range = analyzer.rangeArray(token_idx),
                 .symbol = decl.symbol,
                 .symbol_roles = 0,
                 .override_documentation = .{},
@@ -252,14 +250,14 @@ pub fn getDescriptor(analyzer: *Analyzer, maybe_scope_idx: ?usize) ?[]const u8 {
     } else return null;
 }
 
-pub fn fillRangeList(analyzer: *Analyzer, token: zig.Ast.TokenIndex, list: *std.ArrayListUnmanaged(i32)) !void {
+pub fn rangeArray(analyzer: *Analyzer, token: zig.Ast.TokenIndex) [4]i32 {
     var range_orig = offsets.tokenToRange(analyzer.handle.tree, token);
-    try list.appendSlice(analyzer.allocator, &.{
+    return [4]i32{
         @intCast(i32, range_orig.start.line),
         @intCast(i32, range_orig.start.character),
         @intCast(i32, range_orig.end.line),
         @intCast(i32, range_orig.end.character),
-    });
+    };
 }
 
 pub fn addSymbol(
@@ -285,10 +283,8 @@ pub fn addSymbol(
         .relationships = .{},
     });
 
-    var range_list = std.ArrayListUnmanaged(i32){};
-    try analyzer.fillRangeList(name_token, &range_list);
     try analyzer.occurrences.append(analyzer.allocator, .{
-        .range = range_list,
+        .range = analyzer.rangeArray(name_token),
         .symbol = symbol_name,
         .symbol_roles = 0x1,
         .override_documentation = .{},
