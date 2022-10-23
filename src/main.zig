@@ -68,6 +68,8 @@ pub fn main() !void {
     var arg_reiterator = try std.process.ArgIterator.initWithAllocator(allocator);
     defer arg_reiterator.deinit();
 
+    var bufw = std.io.bufferedWriter(index.writer());
+
     try protobruh.encode(scip.Index{
         .metadata = .{
             .version = .unspecified_protocol_version,
@@ -85,5 +87,7 @@ pub fn main() !void {
         },
         .documents = documents,
         .external_symbols = .{},
-    }, index.writer());
+    }, bufw.writer());
+
+    try bufw.flush();
 }
