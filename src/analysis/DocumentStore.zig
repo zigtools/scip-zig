@@ -120,16 +120,11 @@ pub fn resolveImportHandle(store: *DocumentStore, handle: *Handle, import: []con
 
         return try store.getOrLoadFile(handle.package, rel[std.fs.path.dirname(store.packages.get(handle.package).?.root).?.len + 1 ..]);
     } else {
-        // TODO: Custom packages
-
-        if (std.mem.eql(u8, import, "std")) {
-            try store.createPackage("std", "C:\\Programming\\Zig\\zig-windows-install\\lib\\std\\std.zig");
-            return store.packages.get("std").?.handles.get("std.zig").?;
-        }
-
-        return null;
+        const pkg = store.packages.get(import) orelse return null;
+        return pkg.handles.get(pkg.root);
     }
-    //return store.packages.getEntry(import).?.value_ptr.handles.get(key: K)
+
+    return null;
 }
 
 // pub fn resolveImportPath(store: *DocumentStore, handle: *Handle, import: []const u8) ![]const u8 {
