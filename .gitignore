@@ -2,4 +2,5 @@
 /zig-out
 /scip-snapshot
 *.scip
+*.lsif
 /tok

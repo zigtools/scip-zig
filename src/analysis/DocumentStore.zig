@@ -6,6 +6,7 @@ const logger = std.log.scoped(.store);
 const DocumentStore = @This();
 
 allocator: std.mem.Allocator,
+root_path: []const u8,
 /// Root -> Package
 packages: std.StringHashMapUnmanaged(Package) = .{},
 
@@ -60,7 +61,7 @@ pub fn createPackage(store: *DocumentStore, package: []const u8, root: []const u
         .root = try store.allocator.dupe(u8, root),
     });
 
-    _ = try store.loadFile(package, std.fs.path.basename(root));
+    _ = try store.loadFile(package, try std.fs.path.relative(store.allocator, store.root_path, root));
 }
 
 pub fn loadFile(store: *DocumentStore, package: []const u8, path: []const u8) !*Handle {
@@ -70,7 +71,7 @@ pub fn loadFile(store: *DocumentStore, package: []const u8, path: []const u8) !*
     const package_entry = store.packages.getEntry(package).?;
     const path_duped = try store.allocator.dupe(u8, path);
 
-    var concat_path = try std.fs.path.join(store.allocator, &.{ std.fs.path.dirname(package_entry.value_ptr.*.root).?, path });
+    var concat_path = try std.fs.path.join(store.allocator, &.{ store.root_path, path });
     defer store.allocator.free(concat_path);
 
     var file = try std.fs.openFileAbsolute(concat_path, .{});
