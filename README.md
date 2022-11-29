@@ -31,5 +31,5 @@ To install `scip-zig`, simply `git clone` this repository and run `zig build`; y
 # To index std; currently uses about a 400mbs of memory
 # Windows: should finish in under 10 seconds in release-fast, under a minute in debug
 # WSL: should finish in under 3 seconds in release-fast
-scip-zig --pkg std /path/to/std/std.zig --root std
+scip-zig --root-path /path/to/zig --pkg std /path/to/zig/lib/std/std.zig --root-pkg std
 ```
