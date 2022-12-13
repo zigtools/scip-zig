@@ -1362,7 +1362,7 @@ fn collectDocComments(allocator: std.mem.Allocator, tree: Ast, doc_comments: Ast
     while (true) : (curr_line_tok += 1) {
         const comm = tokens[curr_line_tok];
         if ((container_doc and comm == .container_doc_comment) or (!container_doc and comm == .doc_comment)) {
-            try lines.append(allocator, std.mem.trim(u8, tree.tokenSlice(curr_line_tok)[3..], &std.ascii.spaces));
+            try lines.append(allocator, std.mem.trim(u8, tree.tokenSlice(curr_line_tok)[3..], &std.ascii.whitespace));
         } else break;
     }
 
@@ -1407,7 +1407,7 @@ pub fn fromPath(allocator: std.mem.Allocator, path: []const u8) ![]const u8 {
     // On windows, we need to lowercase the drive name.
     if (builtin.os.tag == .windows) {
         if (buf.items.len > prefix.len + 1 and
-            std.ascii.isAlpha(buf.items[prefix.len]) and
+            std.ascii.isAlphabetic(buf.items[prefix.len]) and
             std.mem.startsWith(u8, buf.items[prefix.len + 1 ..], "%3A"))
         {
             buf.items[prefix.len] = std.ascii.toLower(buf.items[prefix.len]);
