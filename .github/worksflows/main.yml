@@ -1,0 +1,105 @@
+name: CI
+
+on:
+  push:
+    paths:
+      - "**.zig"
+  pull_request:
+    paths:
+      - "**.zig"
+  schedule:
+    - cron: "0 0 * * *"
+  workflow_dispatch:
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+          submodules: true
+      - uses: goto-bus-stop/setup-zig@v2
+        with:
+          version: master
+
+      - run: zig version
+      - run: zig env
+
+      - name: Build
+        run: zig build
+
+      - name: Run Tests
+        run: zig build test
+
+      - name: Build artifacts
+        if: ${{ matrix.os == 'ubuntu-latest' }}
+        run: |
+          declare -a targets=("x86_64-windows" "x86_64-linux" "x86_64-macos" "x86-windows" "x86-linux" "aarch64-linux" "aarch64-macos")
+          mkdir -p "artifacts/"
+
+          for target in "${targets[@]}"; do
+            mkdir -p artifacts/$target
+            echo "Building target ${target}..."   
+            if [ "${GITHUB_REF##*/}" == "master" ]; then
+              echo "Building safe"
+              zig build -Dtarget=${target} -Drelease-safe --prefix artifacts/${target}/
+            else
+              echo "Building debug as action is not running on master"
+              zig build -Dtarget=${target} --prefix artifacts/${target}/
+            fi
+            sed -e '1,5d' < README.md > artifacts/${target}/README.md
+            cp LICENSE artifacts/${target}/
+          done
+
+      - name: Upload x86_64-windows artifact
+        if: ${{ matrix.os == 'ubuntu-latest' }}
+        uses: actions/upload-artifact@v3
+        with:
+          name: scip-zig-x86_64-windows
+          path: artifacts/x86_64-windows/
+
+      - name: Upload x86_64-linux artifact
+        if: ${{ matrix.os == 'ubuntu-latest' }}
+        uses: actions/upload-artifact@v3
+        with:
+          name: scip-zig-x86_64-linux
+          path: artifacts/x86_64-linux/
+
+      - name: Upload x86_64-macos artifact
+        if: ${{ matrix.os == 'ubuntu-latest' }}
+        uses: actions/upload-artifact@v3
+        with:
+          name: scip-zig-x86_64-macos
+          path: artifacts/x86_64-macos/
+
+      - name: Upload x86-windows artifact
+        if: ${{ matrix.os == 'ubuntu-latest' }}
+        uses: actions/upload-artifact@v3
+        with:
+          name: scip-zig-x86-windows
+          path: artifacts/x86-windows/
+
+      - name: Upload x86-linux artifact
+        if: ${{ matrix.os == 'ubuntu-latest' }}
+        uses: actions/upload-artifact@v3
+        with:
+          name: scip-zig-x86-linux
+          path: artifacts/x86-linux/
+
+      - name: Upload aarch64-linux artifact
+        if: ${{ matrix.os == 'ubuntu-latest' }}
+        uses: actions/upload-artifact@v3
+        with:
+          name: scip-zig-aarch64-linux
+          path: artifacts/aarch64-linux/
+
+      - name: Upload aarch64-macos artifact
+        if: ${{ matrix.os == 'ubuntu-latest' }}
+        uses: actions/upload-artifact@v3
+        with:
+          name: scip-zig-aarch64-macos
+          path: artifacts/aarch64-macos/

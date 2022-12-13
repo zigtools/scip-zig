@@ -1280,9 +1280,9 @@ pub fn getDeclNameToken(tree: Ast, node: Ast.Node.Index) ?Ast.TokenIndex {
         },
 
         // containers
-        .container_field => tree.containerField(node).ast.name_token,
-        .container_field_init => tree.containerFieldInit(node).ast.name_token,
-        .container_field_align => tree.containerFieldAlign(node).ast.name_token,
+        .container_field => if (tree.containerField(node).ast.tuple_like) null else tree.containerField(node).ast.main_token,
+        .container_field_init => if (tree.containerFieldInit(node).ast.tuple_like) null else tree.containerFieldInit(node).ast.main_token,
+        .container_field_align => if (tree.containerFieldAlign(node).ast.tuple_like) null else tree.containerFieldAlign(node).ast.main_token,
 
         .identifier => main_token,
         .error_value => main_token + 2, // 'error'.<main_token +2>
