@@ -32,4 +32,13 @@ To install `scip-zig`, simply `git clone` this repository and run `zig build`; y
 # Windows: should finish in under 10 seconds in release-fast, under a minute in debug
 # WSL: should finish in under 3 seconds in release-fast
 scip-zig --root-path /path/to/zig --pkg std /path/to/zig/lib/std/std.zig --root-pkg std
+src code-intel upload -github-token=$(cat tok) -file=index.scip
+```
+
+For example, let's index this very repo:
+
+```bash
+zig-out/bin/scip-zig --root-path $(pwd) --pkg scip-zig $(pwd)/src/main.zig --root-pkg scip-zig
+scip convert --from index.scip
+src code-intel upload -github-token=$(cat tok) -file=index.scip
 ```
