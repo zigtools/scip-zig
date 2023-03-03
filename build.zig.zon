@@ -1,0 +1,10 @@
+.{
+    .name = "scip-zig",
+    .version = "1.0.0",
+    .dependencies = .{
+        .zls = .{
+            .url = "https://github.com/zigtools/zls/archive/build-runner-param-plus-library.tar.gz",
+            .hash = "1220b567bf5c290bbb21a857a029387086ac7d091cc2f3d50c56d939860fd100a72b",
+        },
+    },
+}
